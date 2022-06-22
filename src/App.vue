@@ -17,26 +17,35 @@
           <a-card size="small" :title="item.name">
             <template #extra>
               <a-space>
-                <label v-if="item.type.endsWith('C')">{{ "服务器[" + item.comServer + "]: " + (item.comStatus == 0 ? "未连接"
+                <label v-if="item.type == 'TC'">{{ "服务器[" + item.comServer + "]: " + (item.comStatus == 0 ? "未连接"
                     : "已连接")
                 }}</label>
-                <a-button size="small" v-if="item.status != 1" @click="connect(item.name)">连接</a-button>
-                <a-button size="small" v-if="item.status == 1" @click="disconnect(item.name)">断开</a-button>
+                <label v-if="item.type == 'TS'">{{ "端口[" + item.comServer + "]: " + (item.comStatus == 0 ? "未监听"
+                    : "已监听")
+                }}</label>
+                <a-button size="small" v-if="item.type == 'TC' && item.comStatus != 1" @click="connect(item.name)">连接
+                </a-button>
+                <a-button size="small" v-if="item.type == 'TC' && item.comStatus == 1" @click="disconnect(item.name)">断开
+                </a-button>
                 <a-button size="small" @click="delItem(item.name)" danger>删除</a-button>
               </a-space>
             </template>
             <a-row>
               <a-col :span="12">
-                <a-space><label>发送 </label>
-                  <a-button size="small" @click="addParam(item.name, 'send')">+ 添加字段</a-button>
+                <a-space><label>发送字段 </label>
+                  <a-button v-if="item.type.endsWith('C') && item.sendType == 'SD'"
+                    :disabled="item.type == 'TC' && (item.comStatus == 0 || item.send.length == 0)" @click="send(item.name)">发送</a-button>
                 </a-space>
-                <ParamsList :type="'send'" :params="item.send"></ParamsList>
+                <ParamsList :type="'send'" :params="item.send" :name="item.name" :addParamModalOk="addParamModalOk"
+                  :changeValue="changeValue">
+                </ParamsList>
               </a-col>
               <a-col :span="12">
-                <a-space><label>接收 </label>
-                  <a-button size="small" @click="addParam(item.name, 'recv')">+ 添加字段</a-button>
+                <a-space><label>接收字段 </label>
+
                 </a-space>
-                <ParamsList :type="'recv'" :params="item.recv"></ParamsList>
+                <ParamsList :type="'recv'" :params="item.recv" :name="item.name" :addParamModalOk="addParamModalOk">
+                </ParamsList>
               </a-col>
             </a-row>
           </a-card>
@@ -70,6 +79,10 @@
               <a-radio-button value="JSF">结束符</a-radio-button>
             </a-radio-group>
           </a-form-item>
+          <a-form-item v-if="config.recvType == 'JSF'" label="● 结束符(16进制数字表示)">
+            <a-input :addon-before="'0x'" :allowClear="true" v-model:value="config.recvJsf" type="number"
+              style="width:150px"></a-input>
+          </a-form-item>
         </a-form>
         <a-form layout="inline" :model="config">
           <a-form-item v-if="config.itemType == 'TC' || config.itemType == 'UC'" label="● 服务器地址:端口">
@@ -86,24 +99,7 @@
       <!-- 添加字段模态框 -->
       <a-modal v-model:visible="config.addParamModalShow" width="500px"
         :title="`${tmp.itemName}: 添加${tmp.paramTye == 'send' ? '发送' : '接收'}字段`" ok-text="确认" cancel-text="取消"
-        @ok="addParamModalOk">
-        <a-form :model="addParamConfig">
-          <a-form-item label="● 参数名">
-            <a-input style="width:300px" :allowClear="true" v-model:value="params.name">
-            </a-input>
-          </a-form-item>
-          <a-form-item label="● 参数类型">
-            <a-radio-group v-model:value="params.type" button-style="solid" @change="params.type=='int32'?params.length=4:params.length=null">
-              <a-radio-button value="int32">int32</a-radio-button>
-              <a-radio-button value="str">字符串</a-radio-button>
-            </a-radio-group>
-          </a-form-item>
-          <a-form-item label="● 长度/字节" >
-            <a-input style="width:200px" :disabled="params.type =='int32'" type="number" :allowClear="true" v-model:value="params.length">
-            </a-input>
-          </a-form-item>
-        </a-form>
-      </a-modal>
+        @ok="addParamModalOk"></a-modal>
     </div>
   </a-spin>
 </template>
@@ -118,8 +114,7 @@ export default {
     return {
       spinning1: true,
       spinning2: true,
-      addParamConfig: {},
-      saveItemWs: null,
+      itemWs: null,
       config: {
         server: "127.0.0.1:20003",
         itemType: "TC",
@@ -138,8 +133,7 @@ export default {
           send: [{ name: "param2", type: "str", value: "ceshi", length: 5 }, { name: "param1", type: "int32", value: 4, length: 5 }],
         }*/
       ],
-      tmp: {},
-      params: {}
+      tmp: {}
     };
   },
   components: {
@@ -147,10 +141,7 @@ export default {
   },
   mounted() {
     this.getAllItems();
-    this.initSaveItemWs();
-    window.onbeforeunload = function (e) {
-      this.saveItemWs.close();
-    }
+    this.initItemWs();
   },
   methods: {
     getItemNamePrev() {
@@ -165,11 +156,57 @@ export default {
       });
       return res;
     },
-    initSaveItemWs() {
-      this.saveItemWs = new WebSocket(`ws://${this.config.server}/item`);
-      this.saveItemWs.onopen = () => {
+    initItemWs() {
+      this.itemWs = new WebSocket(`ws://${this.config.server}/item`);
+      this.itemWs.onopen = () => {
         this.spinning2 = false;
       };
+      this.itemWs.onmessage = (e) => {
+        let res = JSON.parse(e.data);
+        let action = res.action;
+        if (action == "update") {
+          this.items.splice(0, 0, res.item);
+          this.initComWs(res.item.name);
+        } else if (action == "updateParams") {
+          let item = this.getItemByName(res.name);
+          item[res.type] = res.params;
+        }
+      }
+    },
+    initComWs(name) {
+      let item = this.getItemByName(name);
+      item.client = new WebSocket(`ws://${this.config.server}/connect?name=${item.name}`);
+      // item.client.onopen = (e) => {
+      //   item.client.send("connect");
+      // }
+      item.client.onmessage = (e) => {
+        console.log("onmessage", e);
+        let res = JSON.parse(e.data);
+        let { action, updData } = res;
+        if (action == "update") {
+          let { key, value } = updData;
+          let keys = key.split(".");
+          let tmp = "item";
+          for (let i = 0; i < keys.length; i++) {
+            tmp += `['${keys[i]}']`;
+          }
+          tmp += "=" + value;
+          eval(tmp);
+        }
+      }
+      item.client.onclose = (e) => {
+        console.log("onclose", e);
+      }
+    },
+    initAllComWs() {
+      this.items.forEach(item => {
+        this.initComWs(item.name);
+      });
+    },
+    sendItemMsg(type, name, data) {
+      let msg = { type: type };
+      msg[name] = data;
+      this.itemWs.send(JSON.stringify(msg));
     },
     getAllItems() {
       let ws = new WebSocket(`ws://${this.config.server}/getAll`);
@@ -182,6 +219,7 @@ export default {
       ws.onmessage = (e) => {
         let items = JSON.parse(e.data);
         this.items = items.reverse();
+        this.initAllComWs();
         this.spinning1 = false;
         ws.close();
       }
@@ -216,30 +254,19 @@ export default {
       } else {
         let item = { type, name, createTime: new Date().getTime(), recv: [], send: [], comStatus: 0, wsStatus: 0, sendType, comServer, sendInterval };
         this.config.newItemName = "";
-        this.saveItemWs.send(JSON.stringify({ type: "add", item }));
-        this.items.splice(0, 0, item);
+        this.sendItemMsg("add", "item", item);
         cb();
       }
     }, connect(name) {
       let item = this.getItemByName(name);
-      let client = new WebSocket(`ws://${this.config.server}/conect?name=${item.name}&test1=234`);
-      client.onopen = (e) => {
-        console.log("open", e);
-      }
-      client.onmessage = (e) => {
-        console.log("onmessage", e);
-      }
-      client.onclose = (e) => {
-        console.log("onclose", e);
-      }
-    }, disconnect(name) {
-      this.items.forEach(item => {
-        if (name == item.name) {
-          if (item.client) {
-            item.client.close();
-          }
-        }
-      });
+      item.client.send("connect");
+    }, send(name) {
+      let item = this.getItemByName(name);
+      item.client.send("send");
+    },
+    disconnect(name) {
+      let item = this.getItemByName(name);
+      item.client.send("disconnect");
     }, delItem(name) {
       let self = this;
       this.$confirm({
@@ -252,7 +279,7 @@ export default {
           self.disconnect(name);
           for (let i = 0; i < self.items.length; i++) {
             if (self.items[i].name == name) {
-              self.saveItemWs.send(JSON.stringify({ type: "del", name }));
+              self.sendItemMsg("del", "name", name);
               self.items.splice(i, 1);
             }
           }
@@ -261,16 +288,14 @@ export default {
           console.log('Cancel');
         },
       });
-    }, addParam(name, type) {
-      this.tmp.itemName = name;
-      this.tmp.paramTye = type;
-      this.config.addParamModalShow = true;
-    }, addParamModalOk() {
-
+    }, addParamModalOk(name, param, type) {
+      this.sendItemMsg("addParam", "data", { name, param, type });
     }, addItemModalOk() {
       this.createItem(() => {
         this.config.addItemModalShow = false;
       });
+    }, changeValue(name, type, paramName, value) {
+      this.sendItemMsg("editParam", "data", { name, type, paramName, value });
     }
   }
 }
