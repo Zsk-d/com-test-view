@@ -16,35 +16,69 @@
         <a-col :lg="24" :xl="12" v-for="(item) in items" :key="item.name">
           <a-card size="small" :title="item.name">
             <template #extra>
-              <a-space>
-                <label v-if="item.type == 'TC'">{{ "服务器[" + item.comServer + "]: " + (item.comStatus == 0 ? "未连接"
-                    : "已连接")
-                }}</label>
-                <label v-if="item.type == 'TS'">{{ "端口[" + item.comServer + "]: " + (item.comStatus == 0 ? "未监听"
-                    : "已监听")
-                }}</label>
-                <a-button size="small" v-if="item.type == 'TC' && item.comStatus != 1" @click="connect(item.name)">连接
-                </a-button>
-                <a-button size="small" v-if="item.type == 'TC' && item.comStatus == 1" @click="disconnect(item.name)">断开
-                </a-button>
-                <a-button size="small" @click="delItem(item.name)" danger>删除</a-button>
-              </a-space>
+              <!-- <a-space> -->
+              <label>发送类型: {{ { 'SD': '手动', 'JG': '间隔', 'CF': '触发' }[config.sendType]
+              }}</label>
+              <a-divider type="vertical" />
+              <label>接收类型: {{ { 'DC': '定长', 'JSF': '结束符' }[config.recvType]
+              }}</label>
+              <a-divider type="vertical" />
+              <label :style="{ 'color': item.comStatus == 1 ? 'green' : 'black' }" v-if="item.type.startsWith('TS')">{{
+                  "客户端: "
+                  + (item.comStatus == 1 ? "已连接" : "未连接")
+              }}</label>
+              <a-divider type="vertical" v-if="item.type.startsWith('TS')" />
+              <label :style="{ 'color': item.comStatus == 1 ? 'green' : 'black' }" v-if="item.type.startsWith('TC')">{{
+                  "服务器["
+                  + item.comServer + "]: " + (item.comStatus == 1 ? "已连接"
+                    : "未连接")
+              }}</label>
+              <label :style="{ 'color': item.comStatus == 1 ? 'green' : 'black' }" v-if="item.type.startsWith('UC')">{{
+                  "服务器[" + item.comServer + "]"}}</label>
+              <label :style="{ 'color': item.listenStatus == 1 ? 'green' : 'black' }" v-if="item.type.endsWith('S')">{{
+                  "端口["
+                  +
+                  item.port + "]: " + (item.listenStatus == 1 ? "已监听"
+                    : "未监听")
+              }}</label>
+              <a-divider type="vertical" v-if="item.type == 'TC'" />
+              <a-button size="small" v-if="item.type == 'TC' && item.comStatus != 1"
+                @click="sendClientMsg(item.name, 'connect')">连接
+              </a-button>
+              <a-button size="small" v-if="item.type == 'TC' && item.comStatus == 1"
+                @click="sendClientMsg(item.name, 'disconnect')">断开
+              </a-button>
+              <a-divider type="vertical" v-if="item.type.endsWith('S')" />
+              <a-button size="small" v-if="item.type.endsWith('S') && item.listenStatus != 1"
+                @click="sendClientMsg(item.name, 'listen')">
+                监听
+              </a-button>
+              <a-button size="small" v-if="item.type.endsWith('S') && item.listenStatus == 1"
+                @click="sendClientMsg(item.name, 'stopListen')">停止监听
+              </a-button>
+              <a-divider type="vertical" />
+              <a-button size="small" @click="delItem(item.name)" danger>删除项目</a-button>
+              <!-- </a-space> -->
             </template>
             <a-row>
-              <a-col :span="12">
-                <a-space><label>发送字段 </label>
-                  <a-button v-if="item.type.endsWith('C') && item.sendType == 'SD'"
-                    :disabled="item.type == 'TC' && (item.comStatus == 0 || item.send.length == 0)" @click="send(item.name)">发送</a-button>
+              <a-col :xs="24" :sm="!(item.type == 'US')?24:12" v-if="!(item.type == 'US')">
+                <a-space><label><span>{{ item.type == 'US' ? '自动回复' : '发送' }}</span>字段 </label>
+                  <a-button v-if="(item.type.startsWith('T') || item.type == 'UC') && item.sendType == 'SD'"
+                    :disabled="item.type.startsWith('T') && item.comStatus == 0 || item.send.length == 0"
+                    @click="sendClientMsg(item.name, 'send')">发送</a-button>
                 </a-space>
-                <ParamsList :type="'send'" :params="item.send" :name="item.name" :addParamModalOk="addParamModalOk"
-                  :changeValue="changeValue">
+                <ParamsList :changeParamIndex="changeParamIndex" :delParam="delParam" :isXs="item.type=='US'" :type="'send'"
+                  :params="item.send" :name="item.name" :addParamModalOk="addParamModalOk" :changeValue="changeValue">
                 </ParamsList>
               </a-col>
-              <a-col :span="12">
+              <a-col :xs="24" :sm="!(item.type == 'UC')?24:12" v-if="!(item.type == 'UC')">
                 <a-space><label>接收字段 </label>
-
+                  <loading-outlined
+                    v-if="(item.comStatus == 1 || item.type == 'US' && item.listenStatus == 1) && (item.waiting == undefined || item.waiting) && item.recv.length > 0" />
+                  <check-circle-outlined v-if="item.waiting == false" />
                 </a-space>
-                <ParamsList :type="'recv'" :params="item.recv" :name="item.name" :addParamModalOk="addParamModalOk">
+                <ParamsList :changeParamIndex="changeParamIndex" :delParam="delParam" :isXs="item.type=='UC'" :type="'recv'"
+                  :params="item.recv" :name="item.name" :addParamModalOk="addParamModalOk">
                 </ParamsList>
               </a-col>
             </a-row>
@@ -83,30 +117,26 @@
             <a-input :addon-before="'0x'" :allowClear="true" v-model:value="config.recvJsf" type="number"
               style="width:150px"></a-input>
           </a-form-item>
-        </a-form>
-        <a-form layout="inline" :model="config">
-          <a-form-item v-if="config.itemType == 'TC' || config.itemType == 'UC'" label="● 服务器地址:端口">
-            <a-input :allowClear="true" v-model:value="config.comServer"></a-input>
+          <a-form-item v-if="config.itemType.endsWith('C') || config.itemType == 'UC'" label="● 服务器地址:端口">
+            <a-input :allowClear="true" v-model:value="config.comServer" style="width:200px"></a-input>
           </a-form-item>
-          <br><br>
+          <a-form-item v-if="config.itemType.endsWith('S')" label="● 端口">
+            <a-input :allowClear="true" v-model:value="config.port" type="number" style="width:120px"></a-input>
+          </a-form-item>
           <a-form-item label="● 项目名称">
             <a-input style="width:300px" :allowClear="true" :addon-before="getItemNamePrev()"
-              v-model:value="config.newItemName" @keyup.enter="createItem">
+              v-model:value="config.newItemName" @keyup.enter="addItemModalOk">
             </a-input>
           </a-form-item>
         </a-form>
       </a-modal>
-      <!-- 添加字段模态框 -->
-      <a-modal v-model:visible="config.addParamModalShow" width="500px"
-        :title="`${tmp.itemName}: 添加${tmp.paramTye == 'send' ? '发送' : '接收'}字段`" ok-text="确认" cancel-text="取消"
-        @ok="addParamModalOk"></a-modal>
     </div>
   </a-spin>
 </template>
 
 <script>
 import ParamsList from "@/components/ParamsList.vue"
-import { ExclamationCircleOutlined } from '@ant-design/icons-vue';
+import { ExclamationCircleOutlined, LoadingOutlined, CheckCircleOutlined } from '@ant-design/icons-vue';
 import { createVNode } from 'vue';
 export default {
   name: 'App',
@@ -137,15 +167,17 @@ export default {
     };
   },
   components: {
-    ParamsList
+    ParamsList, LoadingOutlined, CheckCircleOutlined
   },
   mounted() {
     this.getAllItems();
     this.initItemWs();
+    let self = this;
   },
   methods: {
     getItemNamePrev() {
-      return (this.config.itemType == 'TC' ? 'TCP客户端' : this.config.itemType == 'TS' ? 'TCP服务器' : this.config.itemType == 'UC' ? 'UDP客户端' : 'UDP服务端') + '-';
+      // return (this.config.itemType == 'TC' ? 'TCP客户端' : this.config.itemType == 'TS' ? 'TCP服务器' : this.config.itemType == 'UC' ? 'UDP客户端' : 'UDP服务端') + '-';
+      return this.config.itemType + '-';
     },
     getItemByName(name) {
       let res = null;
@@ -182,8 +214,9 @@ export default {
       item.client.onmessage = (e) => {
         console.log("onmessage", e);
         let res = JSON.parse(e.data);
-        let { action, updData } = res;
+        let action = res.action;
         if (action == "update") {
+          let updData = res.updData;
           let { key, value } = updData;
           let keys = key.split(".");
           let tmp = "item";
@@ -192,6 +225,15 @@ export default {
           }
           tmp += "=" + value;
           eval(tmp);
+        } else if (action == "data") {
+          let data = res.data;
+          for (let i = 0; i < data.length; i++) {
+            item.recv[i].value = data[i];
+          }
+          item.waiting = false;
+          setTimeout(() => {
+            item.waiting = true;
+          }, 100);
         }
       }
       item.client.onclose = (e) => {
@@ -243,6 +285,7 @@ export default {
       let sendType = this.config.sendType;
       let comServer = this.config.comServer;
       let sendInterval = this.config.sendInterval;
+      let port = this.config.port;
       this.items.forEach(item => {
         if (item.name == name) {
           hasItem = true;
@@ -252,21 +295,14 @@ export default {
         this.$message.error(`名称“${name}”重复`);
         return false;
       } else {
-        let item = { type, name, createTime: new Date().getTime(), recv: [], send: [], comStatus: 0, wsStatus: 0, sendType, comServer, sendInterval };
+        let item = { type, name, createTime: new Date().getTime(), recv: [], send: [], comStatus: 0, wsStatus: 0, sendType, comServer, sendInterval, port };
         this.config.newItemName = "";
         this.sendItemMsg("add", "item", item);
         cb();
       }
-    }, connect(name) {
+    }, sendClientMsg(name, msg) {
       let item = this.getItemByName(name);
-      item.client.send("connect");
-    }, send(name) {
-      let item = this.getItemByName(name);
-      item.client.send("send");
-    },
-    disconnect(name) {
-      let item = this.getItemByName(name);
-      item.client.send("disconnect");
+      item.client.send(msg);
     }, delItem(name) {
       let self = this;
       this.$confirm({
@@ -276,7 +312,6 @@ export default {
         cancelText: "取消",
         content: createVNode('div', { style: 'color:red;' }, '此操作无法恢复'),
         onOk() {
-          self.disconnect(name);
           for (let i = 0; i < self.items.length; i++) {
             if (self.items[i].name == name) {
               self.sendItemMsg("del", "name", name);
@@ -296,6 +331,23 @@ export default {
       });
     }, changeValue(name, type, paramName, value) {
       this.sendItemMsg("editParam", "data", { name, type, paramName, value });
+    }, delParam(name, type, paramName) {
+      let self = this;
+      this.$confirm({
+        title: '确定删除此字段?',
+        icon: createVNode(ExclamationCircleOutlined),
+        okText: "确定",
+        cancelText: "取消",
+        content: createVNode('div', { style: 'color:red;' }, '此操作无法恢复'),
+        onOk() {
+          self.sendItemMsg("delParam", "data", { name, type, paramName });
+        },
+        onCancel() {
+          console.log('Cancel');
+        },
+      });
+    }, changeParamIndex(name, type, paramName, value) {
+      this.sendItemMsg("changeParamIndex", "data", { name, type, paramName, value });
     }
   }
 }
