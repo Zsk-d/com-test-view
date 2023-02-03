@@ -39,7 +39,7 @@
             </template>
             <!-- 添加字段面板 -->
             <a-collapse :bordered="false">
-                <a-collapse-panel header="添加字段" :style="{ border: 0 }">
+                <a-collapse-panel header="添加参数" :style="{ border: 0 }">
                     <a-form>
                         <a-form-item label="参数名">
                             <a-input style="width:200px" :allowClear="true" v-model:value="param.name">

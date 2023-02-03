@@ -17,10 +17,10 @@
           <a-card size="small" :title="item.name">
             <template #extra>
               <!-- <a-space> -->
-              <label>发送类型: {{ { 'SD': '手动', 'JG': '间隔', 'CF': '触发' }[config.sendType]
+              <label>发送类型: {{ { 'SD': '手动', 'JG': '间隔', 'CF': '触发' }[item.sendType]
               }}</label>
-              <a-divider type="vertical" />
-              <label>接收类型: {{ { 'DC': '定长', 'JSF': '结束符' }[config.recvType]
+              <a-divider v-if="!item.type.startsWith('H')" type="vertical" />
+              <label v-if="!item.type.startsWith('H')">接收类型: {{ { 'DC': '定长', 'JSF': '结束符' }[item.recvType]
               }}</label>
               <a-divider type="vertical" />
               <label :style="{ 'color': item.comStatus == 1 ? 'green' : 'black' }" v-if="item.type.startsWith('TS')">{{
@@ -33,7 +33,7 @@
                   + item.comServer + "]: " + (item.comStatus == 1 ? "已连接"
                     : "未连接")
               }}</label>
-              <label :style="{ 'color': item.comStatus == 1 ? 'green' : 'black' }" v-if="item.type.startsWith('UC')">{{
+              <label :style="{ 'color': item.comStatus == 1 ? 'green' : 'black' }" v-if="item.type.startsWith('UC') || item.type.startsWith('HC')">{{
                   "服务器[" + item.comServer + "]"}}</label>
               <label :style="{ 'color': item.listenStatus == 1 ? 'green' : 'black' }" v-if="item.type.endsWith('S')">{{
                   "端口["
@@ -63,7 +63,7 @@
             <a-row>
               <a-col :xs="24" :sm="!(item.type == 'US')?24:12" v-if="!(item.type == 'US')">
                 <a-space><label><span>{{ item.type == 'US' ? '自动回复' : '发送' }}</span>字段 </label>
-                  <a-button v-if="(item.type.startsWith('T') || item.type == 'UC') && item.sendType == 'SD'"
+                  <a-button v-if="(item.type.startsWith('T') || item.type == 'UC' || item.type == 'HC') && item.sendType == 'SD'"
                     :disabled="item.type.startsWith('T') && item.comStatus == 0 || item.send.length == 0"
                     @click="sendClientMsg(item.name, 'send')">发送</a-button>
                 </a-space>
@@ -86,11 +86,13 @@
         </a-col>
       </a-row>
       <!-- 新建item模态框 -->
-      <a-modal v-model:visible="config.addItemModalShow" title="创建连接" @ok="addItemModalOk" width="700px" ok-text="创建"
+      <a-modal v-model:visible="config.addItemModalShow" title="创建连接" @ok="addItemModalOk" width="800px" ok-text="创建"
         cancel-text="取消">
         <a-form :model="config">
           <a-form-item label="● 连接类型">
             <a-radio-group v-model:value="config.itemType" button-style="solid">
+              <a-radio-button value="HC">HTTP客户端</a-radio-button>
+              <a-radio-button value="HS">HTTP服务端</a-radio-button>
               <a-radio-button value="TC">TCP客户端</a-radio-button>
               <a-radio-button value="TS">TCP服务器</a-radio-button>
               <a-radio-button value="UC">UDP客户端</a-radio-button>
@@ -101,13 +103,19 @@
             <a-radio-group v-model:value="config.sendType" button-style="solid">
               <a-radio-button value="SD">手动</a-radio-button>
               <a-radio-button value="JG">间隔</a-radio-button>
-              <a-radio-button value="CF">触发</a-radio-button>
+              <a-radio-button v-if="!config.itemType.startsWith('HC')" value="CF">触发</a-radio-button>
+            </a-radio-group>
+          </a-form-item>
+          <a-form-item v-if="config.itemType.startsWith('HC')" label="● 方法">
+            <a-radio-group v-model:value="config.method" button-style="solid">
+              <a-radio-button value="GET">GET</a-radio-button>
+              <a-radio-button value="POST">POST</a-radio-button>
             </a-radio-group>
           </a-form-item>
           <a-form-item label="● 间隔时间/ms" v-if="config.sendType == 'JG'">
             <a-input :allowClear="true" v-model:value="config.sendInterval" type="number" style="width:200px"></a-input>
           </a-form-item>
-          <a-form-item label="● 接收类型">
+          <a-form-item v-if="!config.itemType.startsWith('HC')" label="● 接收类型">
             <a-radio-group v-model:value="config.recvType" button-style="solid">
               <a-radio-button value="DC">定长</a-radio-button>
               <a-radio-button value="JSF">结束符</a-radio-button>
@@ -147,11 +155,12 @@ export default {
       itemWs: null,
       config: {
         server: "127.0.0.1:20003",
-        itemType: "TC",
+        itemType: "HC",
         newItemName: "",
         addParamModalShow: false,
         addItemModalShow: false,
         comServer: "",
+        method: "GET",
         sendType: "SD",
         recvType: "DC"
       },
@@ -295,7 +304,7 @@ export default {
         this.$message.error(`名称“${name}”重复`);
         return false;
       } else {
-        let item = { type, name, createTime: new Date().getTime(), recv: [], send: [], comStatus: 0, wsStatus: 0, sendType, comServer, sendInterval, port };
+        let item = { type, name, createTime: new Date().getTime(), recv: [], send: [], comStatus: 0, wsStatus: 0, sendType, comServer, sendInterval, port, config: this.config };
         this.config.newItemName = "";
         this.sendItemMsg("add", "item", item);
         cb();

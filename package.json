@@ -37,7 +37,7 @@
     "rules": {
       "no-unused-vars": "off",
       "no-undef": "off",
-      "no-debugger":"off"
+      "no-debugger": "off"
     }
   },
   "browserslist": [
